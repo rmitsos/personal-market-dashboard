@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Instrument = { symbol: string; name: string; price: number; change: number; unit?: string; decimals: number; points: number[]; group: "Forex" | "Commodities" };
+type SignalData = {
+  symbol: string;
+  interval: string;
+  direction: "LONG" | "SHORT" | "NO TRADE";
+  timestamp: string;
+  candles: Array<{ datetime: string; open: number; high: number; low: number; close: number; volume: number }>;
+  indicators: { ema9: number[]; ema21: number[]; sessionMean: number; rsi: number; atr: number; support: number; resistance: number };
+  setup: { entry: number; stop: number; target1: number; target2: number; riskReward: number | null; reasons: string[]; invalidation: string };
+};
 
 const seed: Instrument[] = [
   { symbol: "EUR/USD", name: "Euro / US Dollar", price: 1.1542, change: .24, decimals: 4, group: "Forex", points: [31,34,30,37,33,38,41,39,45,48,43,50] },
@@ -14,13 +23,6 @@ const seed: Instrument[] = [
   { symbol: "BZ=F", name: "Brent Crude", price: 71.38, change: -.28, unit: "$", decimals: 2, group: "Commodities", points: [55,52,54,49,51,47,46,43,45,40,41,38] },
   { symbol: "NG=F", name: "Natural Gas", price: 3.08, change: 1.12, unit: "$", decimals: 2, group: "Commodities", points: [25,29,27,34,32,39,37,43,45,42,49,55] }
 ];
-
-const histories: Record<string, number[]> = {
-  "1D": [32,35,33,38,41,37,31,28,34,36,40,47,52,48,44,46,43,39,35,31,34,32,36,41,38,45,49,47,53,56],
-  "1W": [27,30,35,32,38,42,40,45,49,44,47,52,48,55,51,57,54,60,58,64,61,67],
-  "1M": [55,50,47,52,45,41,44,38,35,39,43,46,49,45,52,56,53,58,62,59,65,68],
-  "1Y": [28,34,31,39,37,42,48,45,53,49,58,55,62,66,61,70,67,74,71,78,82,79]
-};
 
 const news = [
   ["10:20", "FX", "Dollar steadies as markets assess the next rate path", "Reuters Markets", "https://www.reuters.com/markets/"],
@@ -39,20 +41,43 @@ function Spark({ item }: { item: Instrument }) {
   return <svg className="spark" viewBox="0 0 220 60" aria-hidden><path d={`${d} L220 60 L0 60Z`} className={up ? "fill up" : "fill down"} /><path d={d} className={up ? "stroke up" : "stroke down"} /></svg>;
 }
 
-function Chart({ points }: { points: number[] }) {
-  const d = path(points, 900, 300);
-  return <svg className="chart" viewBox="0 0 900 340" preserveAspectRatio="none" aria-label="Market trend">
-    <defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#38d6e8" stopOpacity=".28" /><stop offset="100%" stopColor="#38d6e8" stopOpacity="0" /></linearGradient></defs>
-    {[40,100,160,220,280].map(y => <line key={y} x1="0" x2="900" y1={y} y2={y} className="gridline" />)}
-    <path d={`${d} L900 320 L0 320Z`} fill="url(#area)" /><path d={d} className="chartline" />
-    <line x1="675" x2="675" y1="18" y2="320" className="crosshair" /><circle cx="675" cy="202" r="5" className="point" />
+function CandleChart({ data, decimals }: { data: SignalData; decimals: number }) {
+  const candles = data.candles;
+  const allPrices = candles.flatMap(candle => [candle.high, candle.low])
+    .concat(data.indicators.ema9, data.indicators.ema21, [data.indicators.sessionMean]);
+  const min = Math.min(...allPrices), max = Math.max(...allPrices), spread = Math.max(max - min, 0.0001);
+  const width = 900, height = 330, left = 56, right = 14, top = 18, bottom = 34;
+  const chartWidth = width - left - right, chartHeight = height - top - bottom;
+  const x = (index: number) => left + (index + .5) * chartWidth / candles.length;
+  const y = (price: number) => top + (max - price) / spread * chartHeight;
+  const indicatorPath = (values: number[]) => values.map((value, index) => `${index ? "L" : "M"} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" ");
+  const ticks = Array.from({ length: 5 }, (_, index) => max - spread * index / 4);
+  const candleWidth = Math.max(2, chartWidth / candles.length * .58);
+
+  return <svg className="chart candlechart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-label={`${data.symbol} ${data.interval} candlestick chart`}>
+    {ticks.map(tick => <g key={tick}><line x1={left} x2={width-right} y1={y(tick)} y2={y(tick)} className="gridline" /><text x={left-8} y={y(tick)+4} className="price-label" textAnchor="end">{tick.toFixed(decimals)}</text></g>)}
+    <line x1={left} x2={width-right} y1={y(data.indicators.sessionMean)} y2={y(data.indicators.sessionMean)} className="meanline" />
+    {candles.map((candle, index) => {
+      const rising = candle.close >= candle.open;
+      const center = x(index);
+      return <g key={candle.datetime}>
+        <line x1={center} x2={center} y1={y(candle.high)} y2={y(candle.low)} className={rising ? "wick rising" : "wick falling"} />
+        <rect x={center-candleWidth/2} y={Math.min(y(candle.open),y(candle.close))} width={candleWidth} height={Math.max(1.5,Math.abs(y(candle.open)-y(candle.close)))} className={rising ? "candle rising" : "candle falling"} rx="1" />
+      </g>;
+    })}
+    <path d={indicatorPath(data.indicators.ema9)} className="ema ema9" />
+    <path d={indicatorPath(data.indicators.ema21)} className="ema ema21" />
+    {[0, Math.floor(candles.length/2), candles.length-1].map(index => <text key={index} x={x(index)} y={height-9} className="time-label" textAnchor={index === 0 ? "start" : index === candles.length-1 ? "end" : "middle"}>{candles[index]?.datetime.slice(5,16)}</text>)}
   </svg>;
 }
 
 export default function Home() {
   const [markets, setMarkets] = useState(seed);
   const [selected, setSelected] = useState(seed[0]);
-  const [range, setRange] = useState("1D");
+  const [timeframe, setTimeframe] = useState("5min");
+  const [signal, setSignal] = useState<SignalData | null>(null);
+  const [signalError, setSignalError] = useState("");
+  const [signalLoading, setSignalLoading] = useState(true);
   const [filter, setFilter] = useState("All");
   const [status, setStatus] = useState("Indicative · delayed");
   const [activeView, setActiveView] = useState("Overview");
@@ -64,10 +89,25 @@ export default function Home() {
     }).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (!cancelled) { setSignalLoading(true); setSignalError(""); }
+      return fetch(`/api/signals?symbol=${encodeURIComponent(selected.symbol)}&interval=${timeframe}`);
+    })
+      .then(response => response.json().then(body => ({ ok: response.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error || "Signal data unavailable");
+        if (!cancelled) setSignal(body);
+      })
+      .catch(error => { if (!cancelled) { setSignal(null); setSignalError(error instanceof Error ? error.message : "Signal data unavailable"); } })
+      .finally(() => { if (!cancelled) setSignalLoading(false); });
+    return () => { cancelled = true; };
+  }, [selected.symbol, timeframe]);
+
   const visible = filter === "All" ? markets : markets.filter(m => m.group === filter);
   const breadth = markets.filter(m => m.change > 0).length;
   const leader = [...markets].sort((a, b) => b.change - a.change)[0];
-  const analysis = useMemo(() => `${selected.name} has a ${selected.change >= 0 ? "positive" : "defensive"} short-term bias. At ${Math.abs(selected.change).toFixed(2)}% on the session, ${selected.change >= 0 ? "buyers remain in control, although the next session should confirm whether the move has enough breadth." : "selling pressure is visible, but the move still looks contained rather than disorderly."}`, [selected]);
   const price = (m: Instrument) => `${m.unit ?? ""}${m.price.toLocaleString("en-US", { minimumFractionDigits: m.decimals, maximumFractionDigits: m.decimals })}`;
   const navigate = (view: string, target?: string) => {
     setActiveView(view);
@@ -116,12 +156,32 @@ export default function Home() {
 
       <section className="content">
         <article className="panel chartcard">
-          <div className="heading"><div><p className="eyebrow">{selected.group}</p><h2>{selected.name} trend</h2></div><div className="segments">{Object.keys(histories).map(x => <button key={x} onClick={() => setRange(x)} className={range === x ? "active" : ""}>{x}</button>)}</div></div>
+          <div className="heading"><div><p className="eyebrow">{selected.group} · Real OHLC candles</p><h2>{selected.name} intraday chart</h2></div><div className="segments">{["5min","15min","30min","1h"].map(x => <button key={x} onClick={() => setTimeframe(x)} className={timeframe === x ? "active" : ""}>{x.replace("min","m")}</button>)}</div></div>
           <div className="chartvalue"><strong>{price(selected)}</strong><span className={selected.change >= 0 ? "gain" : "loss"}>{selected.change >= 0 ? "+" : ""}{selected.change.toFixed(2)}%</span></div>
-          <Chart points={histories[range]} /><div className="axis"><span>Open</span><span>Mid-session</span><span>Latest</span></div>
+          {signalLoading && <div className="chartstate">Loading intraday candles and calculating indicators…</div>}
+          {signalError && <div className="chartstate error"><strong>Intraday feed unavailable</strong><span>{signalError}</span></div>}
+          {signal && <CandleChart data={signal} decimals={selected.decimals} />}
+          <div className="chartlegend"><span><i className="bull" /> Green candle: price closed higher</span><span><i className="bear" /> Red candle: price closed lower</span><span><i className="fast" /> EMA 9</span><span><i className="slow" /> EMA 21</span><span><i className="mean" /> Session mean</span></div>
+          <div className="axis"><span>Left: older candles</span><span>Price scale shown on chart</span><span>Right: latest candle</span></div>
         </article>
         <aside>
-          <article className="panel analysis"><div className="star">✦</div><p className="eyebrow">Plain analysis</p><h2>{selected.change >= 0 ? "Momentum is constructive" : "Pressure remains contained"}</h2><p>{analysis}</p><div className="watch"><span>What to watch</span><strong>Rates · USD · risk appetite</strong></div></article>
+          <article className={`panel analysis signalcard ${signal?.direction === "LONG" ? "long" : signal?.direction === "SHORT" ? "short" : "neutral"}`}>
+            <div className="signalhead"><div><p className="eyebrow">Rules-based setup</p><h2>{signalLoading ? "Calculating…" : signal?.direction || "Data unavailable"}</h2></div>{signal && <span>{signal.interval.replace("min","m")}</span>}</div>
+            {signal && <>
+              <p className="signalstamp">Last candle: {signal.timestamp}</p>
+              {signal.direction !== "NO TRADE" && <div className="tradelevels">
+                <div><span>Entry</span><strong>{signal.setup.entry.toFixed(selected.decimals)}</strong></div>
+                <div><span>Stop</span><strong>{signal.setup.stop.toFixed(selected.decimals)}</strong></div>
+                <div><span>Target 1</span><strong>{signal.setup.target1.toFixed(selected.decimals)}</strong></div>
+                <div><span>Target 2</span><strong>{signal.setup.target2.toFixed(selected.decimals)}</strong></div>
+              </div>}
+              <div className="indicatorstrip"><span>RSI <b>{signal.indicators.rsi.toFixed(1)}</b></span><span>ATR <b>{signal.indicators.atr.toFixed(selected.decimals)}</b></span><span>R:R <b>{signal.setup.riskReward ? `1:${signal.setup.riskReward}` : "—"}</b></span></div>
+              <h3>Why this setup</h3>
+              <ul>{signal.setup.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>
+              <div className="invalidation"><span>Invalidation</span><strong>{signal.setup.invalidation}</strong></div>
+            </>}
+            {signalError && <p>{signalError}</p>}
+          </article>
           <article className="panel newscard section-anchor" id="news"><div className="heading"><div><p className="eyebrow">Market briefing</p><h2>Latest context</h2></div><a href="https://www.reuters.com/markets/" target="_blank">View all ↗</a></div>
             <div className="news">{news.map(n => <a href={n[4]} target="_blank" rel="noreferrer" key={n[0]+n[1]}><span>{n[0]}</span><span><em>{n[1]}</em><b>{n[2]}</b><small>{n[3]}</small></span><i>›</i></a>)}</div>
           </article>
