@@ -55,6 +55,7 @@ export default function Home() {
   const [range, setRange] = useState("1D");
   const [filter, setFilter] = useState("All");
   const [status, setStatus] = useState("Indicative · delayed");
+  const [activeView, setActiveView] = useState("Overview");
 
   useEffect(() => {
     fetch("/api/markets").then(r => r.ok ? r.json() : Promise.reject()).then(data => {
@@ -68,17 +69,29 @@ export default function Home() {
   const leader = [...markets].sort((a, b) => b.change - a.change)[0];
   const analysis = useMemo(() => `${selected.name} has a ${selected.change >= 0 ? "positive" : "defensive"} short-term bias. At ${Math.abs(selected.change).toFixed(2)}% on the session, ${selected.change >= 0 ? "buyers remain in control, although the next session should confirm whether the move has enough breadth." : "selling pressure is visible, but the move still looks contained rather than disorderly."}`, [selected]);
   const price = (m: Instrument) => `${m.unit ?? ""}${m.price.toLocaleString("en-US", { minimumFractionDigits: m.decimals, maximumFractionDigits: m.decimals })}`;
+  const navigate = (view: string, target?: string) => {
+    setActiveView(view);
+    window.requestAnimationFrame(() => {
+      if (target) document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      else window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  };
 
   return <main>
     <header className="topbar">
       <div className="brand"><span>✦</span>Northstar<small>Markets</small></div>
-      <nav><button className="active">Overview</button><button>Watchlist</button><button>Calendar</button><button>News</button></nav>
+      <nav aria-label="Dashboard navigation">
+        <button onClick={() => navigate("Overview")} className={activeView === "Overview" ? "active" : ""}>Overview</button>
+        <button onClick={() => navigate("Watchlist", "watchlist")} className={activeView === "Watchlist" ? "active" : ""}>Watchlist</button>
+        <button onClick={() => navigate("Calendar", "calendar")} className={activeView === "Calendar" ? "active" : ""}>Calendar</button>
+        <button onClick={() => navigate("News", "news")} className={activeView === "News" ? "active" : ""}>News</button>
+      </nav>
       <div className="open"><i /> Markets open</div><div className="avatar">DM</div>
     </header>
     <div className="shell">
       <section className="welcome"><div><p className="eyebrow">Personal market desk</p><h1>Good morning, Dimi.</h1><p>A calm read on currencies, metals and energy.</p></div><div className="asof"><span>Data status</span><strong>{status}</strong></div></section>
 
-      <section className="panel pulse">
+      <section className="panel pulse section-anchor" id="watchlist">
         <div className="heading"><div><p className="eyebrow">Market pulse</p><h2>What is moving now</h2></div><div className="segments">{["All","Forex","Commodities"].map(x => <button key={x} onClick={() => setFilter(x)} className={filter === x ? "active" : ""}>{x}</button>)}</div></div>
         <div className="tickers">{visible.map(m => <button key={m.symbol} onClick={() => setSelected(m)} className={`ticker ${selected.symbol === m.symbol ? "selected" : ""}`}>
           <span className="tickername"><b>{m.name}</b><em>{m.symbol}</em></span><strong>{price(m)}</strong><span className={m.change >= 0 ? "gain" : "loss"}>{m.change >= 0 ? "+" : ""}{m.change.toFixed(2)}%</span><Spark item={m} />
@@ -91,6 +104,16 @@ export default function Home() {
         <article className="panel"><span>Selected market</span><strong>{selected.name}</strong><p>{selected.group} · {selected.symbol}</p></article>
       </section>
 
+      <section className="panel calendar section-anchor" id="calendar">
+        <div className="heading"><div><p className="eyebrow">Economic calendar</p><h2>Events to watch</h2></div><span className="calendar-date">Today · Athens time</span></div>
+        <div className="events">
+          <article><time>12:00</time><div><b>Euro area confidence indicators</b><span>EUR · Medium impact</span></div><em className="medium">Medium</em></article>
+          <article><time>15:30</time><div><b>U.S. preliminary GDP</b><span>USD · High impact</span></div><em className="high">High</em></article>
+          <article><time>17:00</time><div><b>U.S. pending home sales</b><span>USD · Medium impact</span></div><em className="medium">Medium</em></article>
+          <article><time>17:30</time><div><b>EIA natural gas storage</b><span>Natural Gas · High impact</span></div><em className="high">High</em></article>
+        </div>
+      </section>
+
       <section className="content">
         <article className="panel chartcard">
           <div className="heading"><div><p className="eyebrow">{selected.group}</p><h2>{selected.name} trend</h2></div><div className="segments">{Object.keys(histories).map(x => <button key={x} onClick={() => setRange(x)} className={range === x ? "active" : ""}>{x}</button>)}</div></div>
@@ -99,7 +122,7 @@ export default function Home() {
         </article>
         <aside>
           <article className="panel analysis"><div className="star">✦</div><p className="eyebrow">Plain analysis</p><h2>{selected.change >= 0 ? "Momentum is constructive" : "Pressure remains contained"}</h2><p>{analysis}</p><div className="watch"><span>What to watch</span><strong>Rates · USD · risk appetite</strong></div></article>
-          <article className="panel newscard"><div className="heading"><div><p className="eyebrow">Market briefing</p><h2>Latest context</h2></div><a href="https://www.reuters.com/markets/" target="_blank">View all ↗</a></div>
+          <article className="panel newscard section-anchor" id="news"><div className="heading"><div><p className="eyebrow">Market briefing</p><h2>Latest context</h2></div><a href="https://www.reuters.com/markets/" target="_blank">View all ↗</a></div>
             <div className="news">{news.map(n => <a href={n[4]} target="_blank" rel="noreferrer" key={n[0]+n[1]}><span>{n[0]}</span><span><em>{n[1]}</em><b>{n[2]}</b><small>{n[3]}</small></span><i>›</i></a>)}</div>
           </article>
         </aside>
